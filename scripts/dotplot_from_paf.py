@@ -6,6 +6,7 @@ from matplotlib import pyplot
 from matplotlib import colors
 from matplotlib import cm
 import matplotlib
+import matplotlib.ticker as ticker
 import argparse
 import random
 import numpy
@@ -154,7 +155,6 @@ class PlotData:
         self.dots_y = list()
         self.colors = list()
 
-
 def dotplot_from_paf(paf_path,
                      min_mapq,
                      min_length,
@@ -164,23 +164,22 @@ def dotplot_from_paf(paf_path,
                      color_scale_max,
                      use_full_alignment,
                      use_random_color,
-                     use_endpoints):
+                     use_endpoints,
+                     invert_xaxis=False,  # <-- ADDED parameter to invert axes
+                     invert_yaxis=False,
+                     line_color=None, # <-- ADDED parameter for line color
+                     xlabel="Reference",  # <-- ADDED parameter for axis titles
+                     ylabel="Query",
+                     title=None,         # <-- ADDED parameter for custom figure title
+                     unit="mb"):        # <-- ADDED parameter for unit selection ('bp', 'kb', 'mb')
 
     plot_data_per_alignment_pair = defaultdict(lambda: PlotData())
-    figures_per_alignment_pair = defaultdict(lambda: pyplot.figure())
-    lengths_per_alignment_pair = dict()
-
-    # ref_names = set()
-    # lines = list()
-    # dots_x = list()
-    # dots_y = list()
-    # colors = list()
-
+    
     color_index = None
     store_tags = use_full_alignment or (color_by is not None)
 
     with open(paf_path, 'r') as file:
-        for l,line in enumerate(file):
+        for l, line in enumerate(file):
             paf_element = PafElement(paf_line=line, store_tags=store_tags)
             pair_identifier = paf_element.get_query_name() + "_VS_" + paf_element.get_ref_name()
 
@@ -193,7 +192,6 @@ def dotplot_from_paf(paf_path,
 
                     data = paf_element.get_data_by_column(color_index)
 
-                    # Check if this field is compatible with user's choice for arbitrary vs numeric
                     if color_scale_max is not None:
                         if type(data) == str and not data.isnumeric():
                             exit("ERROR: cannot interpret data as numeric: \n\t" + data)
@@ -201,6 +199,7 @@ def dotplot_from_paf(paf_path,
             elif not use_full_alignment:
                 color_index = 0
 
+            lengths_per_alignment_pair = getattr(locals(), 'lengths_per_alignment_pair', dict())
             lengths_per_alignment_pair[pair_identifier] = max(paf_element.get_ref_length(), paf_element.get_query_length())
 
             if paf_element.get_map_quality() < min_mapq:
@@ -226,43 +225,84 @@ def dotplot_from_paf(paf_path,
                     use_random_color=use_random_color,
                     use_endpoints=use_endpoints)
 
-    for pair_identifier,data in plot_data_per_alignment_pair.items():
+    # Prevent Matplotlib warning if processing more than 20 alignment pairs
+    if len(plot_data_per_alignment_pair) > 20:
+        matplotlib.rcParams['figure.max_open_warning'] = max(50, len(plot_data_per_alignment_pair) + 10)
+
+    figures_per_alignment_pair = defaultdict(lambda: pyplot.figure())
+    lengths_per_alignment_pair = locals().get('lengths_per_alignment_pair', dict())
+
+    for pair_identifier, data in plot_data_per_alignment_pair.items():
         figure = figures_per_alignment_pair[pair_identifier]
         axes = figure.add_subplot()
+        
+        # Handle custom vs default line colors
+        colors_to_use = line_color if line_color is not None else data.colors
 
-        line_collection = collections.LineCollection(data.lines, colors=data.colors, linewidths=linewidth, alpha=alpha)
+        line_collection = collections.LineCollection(data.lines, colors=colors_to_use, linewidths=linewidth, alpha=alpha)
         axes.add_collection(line_collection)
 
         axes.scatter(data.dots_x, data.dots_y, color="black", s=linewidth/2, zorder=sys.maxsize)
 
         axes.set_aspect('equal')
-        axes.set_ylim([0,lengths_per_alignment_pair[pair_identifier]])
-        axes.set_xlim([0,lengths_per_alignment_pair[pair_identifier]])
+        axes.set_ylim([0, lengths_per_alignment_pair.get(pair_identifier, 1)])
+        axes.set_xlim([0, lengths_per_alignment_pair.get(pair_identifier, 1)])
 
-        axes.set_xlabel("Reference")
-        axes.set_ylabel("Query")
+        # Apply axis inversion if requested
+        if invert_xaxis:
+            axes.invert_xaxis()
+        if invert_yaxis:
+            axes.invert_yaxis()
 
-        axes.set_title(pair_identifier)
+        # Unit scaling and formatting logic
 
-        if not use_random_color and not color_scale_max is None:
-            # create an axes on the right side of ax. The width of cax will be 5%
-            # of ax and the padding between cax and ax will be fixed at 0.05 inch.
+        unit_lower = unit.lower()
+        if unit_lower == 'kb':
+            scale_factor = 1e-3
+            unit_label = 'Kb'
+        elif unit_lower == 'mb':
+            scale_factor = 1e-6
+            unit_label = 'Mb'
+        else:  # 'bp'
+            scale_factor = 1.0
+            unit_label = 'bp'
+
+        # Formatter to scale ticks cleanly
+        formatter = ticker.FuncFormatter(lambda x, pos: f"{x * scale_factor:.1f}" if scale_factor != 1.0 else f"{int(x)}")
+        axes.xaxis.set_major_formatter(formatter)
+        axes.yaxis.set_major_formatter(formatter)
+
+        # Append unit suffix to axis labels if using defaults or cleanly format them
+        final_xlabel = f"{xlabel} ({unit_label})" if xlabel in ["Reference", "Reference (Mb)", "Reference (Kb)", "Reference (bp)"] else xlabel
+        final_ylabel = f"{ylabel} ({unit_label})" if ylabel in ["Query", "Query (Mb)", "Query (Kb)", "Query (bp)"] else ylabel
+
+        axes.set_xlabel(final_xlabel)
+        axes.set_ylabel(final_ylabel)
+
+        # Use custom title if provided, otherwise fallback to pair_identifier
+        current_title = title if title is not None else pair_identifier
+        axes.set_title(current_title)
+
+        if not use_random_color and color_scale_max is not None:
             divider = make_axes_locatable(axes)
             cax = divider.append_axes("right", size="5%", pad=0.05)
 
-            colorbar_tick_labels = [round(x,3) for x in numpy.linspace(0, color_scale_max, 10)]
+            colorbar_tick_labels = [round(x, 3) for x in numpy.linspace(0, color_scale_max, 10)]
             colorbar_ticks = numpy.linspace(0, 1, 10)
-            print(colorbar_ticks)
 
             colorbar = matplotlib.colorbar.ColorbarBase(cax, cmap=GNUPLOT_COLORMAP)
             colorbar.set_label(color_by)
             colorbar.set_ticks(colorbar_ticks)
             colorbar.set_ticklabels(colorbar_tick_labels)
 
-            figure.tight_layout()
+        figure.tight_layout()
 
     pyplot.show()
-    pyplot.close()
+    pyplot.close('all')
+
+
+
+
 
 
 if __name__ == "__main__":
@@ -343,6 +383,14 @@ if __name__ == "__main__":
         help="Add this boolean flag to optionally plot black circle delimiters on the ends of alignment lines"
     )
 
+    parser.add_argument('--invert_xaxis', required=False, action='store_true', help='Invert the X-axis')
+    parser.add_argument('--invert_yaxis', required=False, action='store_true', help='Invert the Y-axis')
+    parser.add_argument('--line_color', required=False, type=str, default=None, help='Force a static color for alignment lines')
+    parser.add_argument('--xlabel', required=False, type=str, default='Reference', help='Custom label for X-axis')
+    parser.add_argument('--ylabel', required=False, type=str, default='Query', help='Custom label for Y-axis')
+    parser.add_argument('--title', required=False, type=str, default=None, help='Custom title for the figure')
+    parser.add_argument('--unit', required=False, type=str, choices=['bp', 'kb', 'mb'], default='mb', help='Axis coordinate units: bp, kb, or mb (default: mb)')
+
     args = parser.parse_args()
 
     dotplot_from_paf(args.i,
@@ -354,4 +402,11 @@ if __name__ == "__main__":
                      color_scale_max=args.scalar_color,
                      use_full_alignment=args.use_cigar,
                      use_random_color=args.random_color,
-                     use_endpoints=args.endpoints)
+                     use_endpoints=args.endpoints,
+                     invert_xaxis=args.invert_xaxis,
+                     invert_yaxis=args.invert_yaxis,
+                     line_color=args.line_color,
+                     xlabel=args.xlabel,
+                     ylabel=args.ylabel,
+                     title=args.title,
+                     unit=args.unit)

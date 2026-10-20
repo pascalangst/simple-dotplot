@@ -1,3 +1,28 @@
+# Modifications
+
+I added a couple of options:
+
+```
+                     invert_xaxis=False,  # <-- ADDED parameter to invert axes
+                     invert_yaxis=False,
+                     line_color=None, # <-- ADDED parameter for line color
+                     xlabel="Reference",  # <-- ADDED parameter for axis titles
+                     ylabel="Query",
+                     title=None,         # <-- ADDED parameter for custom figure title
+                     unit="mb"):        # <-- ADDED parameter for unit selection ('bp', 'kb', 'mb')
+```
+
+For example:
+
+```
+python3 simple-dotplot/scripts/dotplot_from_paf.py -i file.paf --invert_yaxis --width 4 --line_color black --xlabel "Clone DZ-JV-2 (Mb)" --ylabel "Clone US-SP221-1 (Mb)" --title ""
+```
+
+
+
+
+
+
 # simple-dotplot
 Very simple and configurable all-in-one dotplot program. Only very basic system dependencies such as build tools are required. Create a dotplot directly from a pair of FASTA/FASTQ files without having to run nucmer or any other alignment manually. Alternatively, if you have a PAF already (from a mapper such as minimap2), make a simple dot plot using that.
 
